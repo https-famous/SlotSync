@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client-js"   
+}                                                             // this generates a javascript client that will later be used in contollers when accessing the database
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}                                                                 // This tells Prisma which database engine and where to find the connection string
+
+enum Role {
+  client
+  owner
+}                                                               // Fixed lists of allowed values. Postgres will reject anything outside these
+
+enum ServiceCategory {
+  haircuts
+  massage
+  coaching
+  consulting
+  other
+}
+
+enum BookingStatus {
+  pending
+  confirmed
+  completed
+  cancelled
+  no_show
+  rescheduled
+}
+
+// One account for everyone. Owning a business (see Business.ownerId) doesn't
+// remove someone's ability to also book as a client elsewhere.
+model User {
+  id           String     @id @default(uuid())                                        // the thurd line is an attribute
+  email        String     @unique
+  passwordHash String
+  name         String
+  role         Role       @default(client)
+  createdAt    DateTime   @default(now())
+
+  business     Business?
+  bookings     Booking[]  @relation("ClientBookings")
+}
+
+model Business {
+  id        String    @id @default(uuid())
+  ownerId   String    @unique
+  owner     User      @relation(fields: [ownerId], references: [id])
+  name      String
+  slug      String    @unique
+  timezone  String    @default("UTC")
+  createdAt DateTime  @default(now())
+
+  services     Service[]
+  availability AvailabilityRule[]
+  exceptions   AvailabilityException[]
+  bookings     Booking[]
+}
+
+model Service {
+  id             String          @id @default(uuid())
+  businessId     String
+  business       Business        @relation(fields: [businessId], references: [id])
+  name           String
+  category       ServiceCategory @default(other)
+  durationMin    Int
+  priceCents     Int
+  depositCents   Int
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+
+  bookings       Booking[]
+
+  @@index([businessId])                                               //Tells Postgres: "build a lookup index on this column, so searching by it is fast."
+  @@index([category])                                                 //Tells Postgres: "build a lookup index on this column, so searching by it is fast."
+}
+
+// Recurring weekly hours, e.g. Mon 09:00-17:00
+model AvailabilityRule {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+  dayOfWeek  Int      // 0 = Sunday ... 6 = Saturday
+  startTime  String   // "09:00"
+  endTime    String   // "17:00"
+
+  @@index([businessId])
+}
+
+// One-off closures or extended hours (holidays, etc.)
+model AvailabilityException {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+  date       DateTime
+  isClosed   Boolean  @default(true)
+  startTime  String?
+  endTime    String?
+
+  @@index([businessId])
+}
+
+model Booking {
+  id                 String        @id @default(uuid())
+  businessId         String
+  business           Business      @relation(fields: [businessId], references: [id])
+  serviceId          String
+  service            Service       @relation(fields: [serviceId], references: [id])
+
+  clientUserId       String
+  clientUser         User          @relation("ClientBookings", fields: [clientUserId], references: [id])
+
+  startAt            DateTime      // stored UTC
+  endAt              DateTime      // stored UTC
+
+  status             BookingStatus @default(pending)
+  depositAmountCents Int
+  stripePaymentIntentId String?
+
+  // Emailed magic-link access — kept alongside the account dashboard
+  // deliberately, as the email-automation showcase feature.
+  manageToken        String        @unique @default(uuid())
+
+  rescheduledFromId  String?       @unique
+  rescheduledFrom    Booking?      @relation("RescheduleChain", fields: [rescheduledFromId], references: [id])
+  rescheduledTo      Booking?      @relation("RescheduleChain")
+
+  createdAt          DateTime      @default(now())
+  cancelledAt        DateTime?
+
+  // Prevents two bookings on the same business+service+start time.
+  @@unique([businessId, serviceId, startAt])
+  @@index([businessId, startAt])
+  @@index([clientUserId])
+}
