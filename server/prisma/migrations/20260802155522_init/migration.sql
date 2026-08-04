@@ -89,7 +89,7 @@ CREATE TABLE "Booking" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");                               //this basically combines the unique feature which helps to go through rows of value and @@unique at a faster speed
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Business_ownerId_key" ON "Business"("ownerId");
