@@ -10,7 +10,7 @@ export default function Login() {
 
   const {
     register, // This is how you connect a plain <input> to React Hook Form's internal state, without you manually wiring useState + onChange for every single field yourself.
-    handleSubmit, //
+    handleSubmit, //So you never manually call e.preventDefault() or manually collect field values — handleSubmit does both, then calls your function with clean data.
     formState: { isSubmitting },
   } = useForm(); // Calling useForm() gives back one big object with many tools inside it — validation state, error tracking, form values, reset functions, etc You're not using most of it here, so you destructure out only what you need: register, handleSubmit, and (nested inside another object) isSubmitting.
 
@@ -25,8 +25,8 @@ export default function Login() {
 
       // "Account decides where you land" — ask /me whether this account
       // owns a business, and route accordingly. No role toggle at login.
-      const me = await api.get("/auth/me");
-      navigate(me.data.business ? "/dashboard" : "/");
+      const me = await api.get("/auth/me");                                // this line mainly helps us to get the response on the user from the prisma database 
+      navigate(me.data.business ? "/dashboard" : "/");                       // This is what we use to navigate between ifthe owner has a business or not it access the user.business then redirects either to /dashboard or /
     } catch (err) {
       setServerError(err.response?.data?.error || "Something went wrong");
     }
