@@ -34,16 +34,37 @@ export async function getBusinessBySlug(req, res, next) {
 
 // POST /api/businesses — "List your business" flow.
 // Turns the signed-in client account into a business owner.
+
 export async function createBusiness(req, res, next) {
   try {
     const { name, slug, timezone } = req.body;
 
-    // TODO: validate slug is URL-safe and unique (Prisma will throw P2002
-    // if not — errorHandler already converts that into a friendly message).
-    // TODO: update the user's role to "owner" alongside creating the business.
+    if (!name || !slug) {
+      return res.status(400).json({ error: "Business name and URL slug are required" });
+    }
+
+    // One business per account. Business.ownerId is @unique in the schema too
+    // (Prisma would throw P2002 either way) — checking first just lets us
+    // return a clearer message than the generic "conflict" one.
+    const existing = await prisma.business.findUnique({ where: { ownerId: req.user.id } });
+    if (existing) {
+      return res.status(409).json({ error: "You already have a business registered" });
+    }
 
     const business = await prisma.business.create({
-      data: { name, slug, timezone, ownerId: req.user.id },
+      data: {
+        name,
+        slug,
+        timezone: timezone || "UTC",
+        ownerId: req.user.id,
+      },
+    });
+
+    // Promote this account to "owner" now that it has a business — this is
+    // the role requireOwner checks on service/availability management routes.
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { role: "owner" },
     });
 
     res.status(201).json(business);
