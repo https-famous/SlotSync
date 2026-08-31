@@ -7,6 +7,7 @@ import businessRoutes from "./routes/business.routes.js";
 import serviceRoutes from "./routes/service.routes.js";
 import bookingRoutes from "./routes/booking.routes.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import availabilityRoutes from "./routes/availability.routes.js";
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/businesses", businessRoutes);
 app.use("/api/services", serviceRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/availability", availabilityRoutes);
 
 app.use(errorHandler);
 
