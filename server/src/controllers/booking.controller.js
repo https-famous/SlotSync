@@ -1,34 +1,133 @@
 import { prisma } from "../config/db.js";
+import { stripe } from "../utils/stripe.js";
 
 // GET /api/bookings/slots?serviceId=&date=
-// This is the trickiest piece in the whole app — see plan doc section B.
+// GET /api/bookings/slots?serviceId=&date=   (date format: "2026-01-21")
 export async function getAvailableSlots(req, res, next) {
   try {
-    // TODO:
-    // 1. Load the service -> business -> AvailabilityRule for that day of week
-    // 2. Subtract any AvailabilityException for that date
-    // 3. Generate candidate slots at service.durationMin intervals
-    // 4. Subtract existing Bookings (status in [pending, confirmed]) for that
-    //    business+date so already-taken slots don't show as open
-    // 5. Return slots as UTC ISO strings — client converts to local display
-    res.status(501).json({ error: "Not implemented yet" });
+    const { serviceId, date } = req.query;
+    if (!serviceId || !date) {
+      return res.status(400).json({ error: "serviceId and date are required" });
+    }
+
+    const service = await prisma.service.findUnique({ where: { id: serviceId } });
+    if (!service) return res.status(404).json({ error: "Service not found" });
+
+    const requestedDate = new Date(date + "T00:00:00.000Z");                            // this combines the date and the UTC timezone 
+    const dayOfWeek = requestedDate.getUTCDay(); // 0=Sun ... 6=Sat
+
+    // 1. Exceptions override the normal weekly rule for this specific date.
+    const exception = await prisma.availabilityException.findFirst({
+      where: { businessId: service.businessId, date: requestedDate },
+    });
+
+    if (exception?.isClosed) {
+      return res.json([]); // closed all day — no slots to generate
+    }
+
+    let startTime, endTime;
+    if (exception?.startTime && exception?.endTime) {
+      startTime = exception.startTime;                         // if there is an expection then this is the expectiton start time
+      endTime = exception.endTime;                             // if there is an expection then this is the expectiton end time
+    } else {
+      // 2. No exception — fall back to the normal weekly rule for this day.
+      const rule = await prisma.availabilityRule.findFirst({
+        where: { businessId: service.businessId, dayOfWeek },
+      });
+      if (!rule) return res.json([]); // no rule for this weekday = closed
+      startTime = rule.startTime;
+      endTime = rule.endTime;
+    }
+
+    // 3. Generate candidate slots, one every `durationMin` minutes.
+    const [startHour, startMin] = startTime.split(":").map(Number);                       // this split time like 9:00 to  startHour=9, startMin=0
+    const [endHour, endMin] = endTime.split(":").map(Number);
+
+    const dayStart = new Date(requestedDate);                                              // this saves it to dayStart and uses the UTC so asany server that runs this code won't use it's timezone
+    dayStart.setUTCHours(startHour, startMin, 0, 0);
+    const dayEnd = new Date(requestedDate);
+    dayEnd.setUTCHours(endHour, endMin, 0, 0);
+
+    const candidates = [];
+    let cursor = new Date(dayStart);
+    while (cursor.getTime() + service.durationMin * 60000 <= dayEnd.getTime()) {                           // this start at the dayStart and continues by 6000ms till the dayEnd
+      candidates.push(new Date(cursor));
+      cursor = new Date(cursor.getTime() + service.durationMin * 60000);
+    }
+
+    // 4. Remove slots that are already booked (pending or confirmed).
+    const dayEndExclusive = new Date(dayStart);
+    dayEndExclusive.setUTCHours(23, 59, 59, 999);                 // this thend of the calendar day 23 hours 59 minutes 59 seconds
+
+    const existingBookings = await prisma.booking.findMany({
+      where: {
+        businessId: service.businessId,
+        startAt: { gte: dayStart, lte: dayEndExclusive },
+        status: { in: ["pending", "confirmed"] },                              // THis gets all the slots thave been booked either pendin or confirmed
+      },
+      select: { startAt: true },                                                  
+    });
+    const takenTimes = new Set(existingBookings.map((b) => b.startAt.toISOString()));      // this looks through the exisitng bookings then converts to a string
+
+    const slots = candidates
+      .filter((c) => !takenTimes.has(c.toISOString()))                                         // this  checks for the available slots
+      .map((c) => c.toISOString());                                                          //Final step: keep only the candidate slots whose ISO string isn't in the taken set
+
+    res.json(slots);
   } catch (err) {
     next(err);
   }
 }
 
 // POST /api/bookings
-// Concurrency safety comes from the Prisma @@unique([businessId, serviceId, startAt])
-// constraint — just attempt the create and let Prisma's P2002 error (caught by
-// errorHandler.js) tell the client "someone else just took that slot."
 export async function createBooking(req, res, next) {
   try {
-    // TODO:
-    // 1. Create booking with status "pending"
-    // 2. Create a Stripe PaymentIntent for service.depositCents
-    // 3. Return the client secret so the frontend can confirm payment
-    // Booking stays "pending" until the webhook confirms payment succeeded.
-    res.status(501).json({ error: "Not implemented yet" });
+    const { serviceId, startAt } = req.body;
+    if (!serviceId || !startAt) {
+      return res.status(400).json({ error: "serviceId and startAt are required" });
+    }
+
+    const service = await prisma.service.findUnique({ where: { id: serviceId } });
+    if (!service || !service.active) {
+      return res.status(404).json({ error: "Service not found" });
+    }
+
+    const startDate = new Date(startAt);
+    const endDate = new Date(startDate.getTime() + service.durationMin * 60000);
+
+    // Create the booking first. The @@unique constraint on
+    // [businessId, serviceId, startAt] is what actually prevents double-booking —
+    // if someone else grabbed this exact slot a moment ago, this throws P2002,
+    // which errorHandler.js turns into "That slot was just booked."
+    const booking = await prisma.booking.create({
+      data: {
+        businessId: service.businessId,
+        serviceId: service.id,
+        clientUserId: req.user.id,
+        startAt: startDate,
+        endAt: endDate,
+        depositAmountCents: service.depositCents,
+        status: "pending",
+      },
+    });
+
+    // Now create the Stripe PaymentIntent for the deposit amount.
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: booking.depositAmountCents,
+      currency: "usd", // TODO: make this configurable per business later
+      metadata: { bookingId: booking.id },
+    });
+
+    // Save the PaymentIntent id so the webhook can find this booking later.
+    const updated = await prisma.booking.update({
+      where: { id: booking.id },
+      data: { stripePaymentIntentId: paymentIntent.id },
+    });
+
+    res.status(201).json({
+      booking: updated,
+      clientSecret: paymentIntent.client_secret,
+    });
   } catch (err) {
     next(err);
   }
