@@ -120,7 +120,7 @@ export async function createBooking(req, res, next) {
       metadata: { bookingId: booking.id },
     });
 
-    // Save the PaymentIntent id so the webhook can find this booking later.
+    // Save the PaymentIntent id so the webhook can find this booking later. larger scale
     const updated = await prisma.booking.update({
       where: { id: booking.id },
       data: { stripePaymentIntentId: paymentIntent.id },
