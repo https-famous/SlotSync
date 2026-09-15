@@ -1,6 +1,7 @@
 import { prisma } from "../config/db.js";
 import { stripe } from "../utils/stripe.js";
 
+
 // GET /api/bookings/slots?serviceId=&date=
 // GET /api/bookings/slots?serviceId=&date=   (date format: "2026-01-21")
 export async function getAvailableSlots(req, res, next) {
@@ -115,6 +116,7 @@ export async function createBooking(req, res, next) {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: booking.depositAmountCents,
       currency: "usd", // TODO: make this configurable per business later
+      payment_method_types: ["card"], // deposits are simple card payments — no redirect-based methods needed
       metadata: { bookingId: booking.id },
     });
 
@@ -133,15 +135,59 @@ export async function createBooking(req, res, next) {
   }
 }
 
+
+
 // POST /api/bookings/webhook — Stripe calls this directly (raw body, see index.js)
 export async function stripeWebhook(req, res, next) {
+  let event;
+
   try {
-    // TODO:
-    // 1. Verify signature with STRIPE_WEBHOOK_SECRET
-    // 2. On payment_intent.succeeded -> set booking status "confirmed",
-    //    then trigger confirmation email (see utils/email.js)
-    // 3. On payment_intent.payment_failed -> release the slot (delete or
-    //    mark cancelled so the unique constraint frees up)
+    // Verify this request genuinely came from Stripe, not someone spoofing
+    // a fake "payment succeeded" call to your server.
+    const signature = req.headers["stripe-signature"];
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (err) {
+    console.error("Webhook signature verification failed:", err.message);
+    return res.status(400).json({ error: "Invalid signature" });
+  }
+
+  try {
+    if (event.type === "payment_intent.succeeded") {
+      const paymentIntent = event.data.object;
+
+      const booking = await prisma.booking.findFirst({
+        where: { stripePaymentIntentId: paymentIntent.id },
+      });
+
+      if (booking && booking.status === "pending") {
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: { status: "confirmed" },
+        });
+        // TODO: sendConfirmationEmail(booking) — wiring this up in the
+        // email automation feature next.
+      }
+    }
+
+    if (event.type === "payment_intent.payment_failed") {
+      const paymentIntent = event.data.object;
+
+      const booking = await prisma.booking.findFirst({
+        where: { stripePaymentIntentId: paymentIntent.id },
+      });
+
+      if (booking && booking.status === "pending") {
+        // Delete rather than mark cancelled — this frees the @@unique slot
+        // immediately so someone else can book it. A cancelled booking with
+        // real history is different from one that never got paid at all.
+        await prisma.booking.delete({ where: { id: booking.id } });
+      }
+    }
+
     res.json({ received: true });
   } catch (err) {
     next(err);

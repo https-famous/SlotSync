@@ -14,7 +14,7 @@ const app = express();
 app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
 
 // Stripe webhooks need the raw body — mount before express.json().
-app.use("/api/bookings/webhook", express.raw({ type: "application/json" }));
+app.use("/api/bookings/webhook", express.raw({ type: "application/json" }));              //This has to stay before express.json() — Stripe's signature check needs the raw, unparsed request body, not JSON that's already been parsed.
 app.use(express.json());
 
 app.get("/health", (req, res) => res.json({ ok: true }));

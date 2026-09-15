@@ -52,7 +52,7 @@ export default function AdminAvailability() {
     });
   }
 
-  if (isLoading) return <div className="p-8 text-sm text-gray-500">Loading…</div>;
+  if (isLoading) return <div className="p-8 text-sm text-gray-500">Loading…</div>;  // during s loaing it automatically returns this component
 
   return (
     <div className="p-8 max-w-xl">
