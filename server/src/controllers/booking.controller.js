@@ -142,8 +142,6 @@ export async function stripeWebhook(req, res, next) {
   let event;
 
   try {
-    // Verify this request genuinely came from Stripe, not someone spoofing
-    // a fake "payment succeeded" call to your server.
     const signature = req.headers["stripe-signature"];
     event = stripe.webhooks.constructEvent(
       req.body,
@@ -158,33 +156,31 @@ export async function stripeWebhook(req, res, next) {
   try {
     if (event.type === "payment_intent.succeeded") {
       const paymentIntent = event.data.object;
+      const bookingId = paymentIntent.metadata?.bookingId;
 
-      const booking = await prisma.booking.findFirst({
-        where: { stripePaymentIntentId: paymentIntent.id },
-      });
-
-      if (booking && booking.status === "pending") {
-        await prisma.booking.update({
-          where: { id: booking.id },
-          data: { status: "confirmed" },
-        });
-        // TODO: sendConfirmationEmail(booking) — wiring this up in the
-        // email automation feature next.
+      if (bookingId) {
+        const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
+        if (booking && booking.status === "pending") {
+          await prisma.booking.update({
+            where: { id: booking.id },
+            data: {
+              status: "confirmed",
+              stripePaymentIntentId: paymentIntent.id, // backfill in case it never saved earlier
+            },
+          });
+        }
       }
     }
 
     if (event.type === "payment_intent.payment_failed") {
       const paymentIntent = event.data.object;
+      const bookingId = paymentIntent.metadata?.bookingId;
 
-      const booking = await prisma.booking.findFirst({
-        where: { stripePaymentIntentId: paymentIntent.id },
-      });
-
-      if (booking && booking.status === "pending") {
-        // Delete rather than mark cancelled — this frees the @@unique slot
-        // immediately so someone else can book it. A cancelled booking with
-        // real history is different from one that never got paid at all.
-        await prisma.booking.delete({ where: { id: booking.id } });
+      if (bookingId) {
+        const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
+        if (booking && booking.status === "pending") {
+          await prisma.booking.delete({ where: { id: booking.id } });
+        }
       }
     }
 
@@ -193,7 +189,6 @@ export async function stripeWebhook(req, res, next) {
     next(err);
   }
 }
-
 // GET /api/bookings/mine — account dashboard path
 export async function getMyBookings(req, res, next) {
   try {
