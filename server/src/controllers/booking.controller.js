@@ -1,7 +1,31 @@
 import { prisma } from "../config/db.js";
 import { stripe } from "../utils/stripe.js";
+import jwt from "jsonwebtoken";
 
 
+
+
+// Two valid ways to prove you can modify a booking: you're logged in as the
+// client who made it, OR you hold the emailed manageToken. Written this way
+// because cancel/reschedule need to work both from the account dashboard
+// (logged in) and from the emailed magic link (no login at all).
+async function isAuthorizedForBooking(req, booking, manageToken) {
+  const header = req.headers.authorization;
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      if (decoded.id === booking.clientUserId) return true;
+    } catch {
+      // invalid/expired token — fall through to check manageToken instead
+    }
+  }
+
+  if (manageToken && manageToken === booking.manageToken) return true;
+
+  return false;
+}
 // GET /api/bookings/slots?serviceId=&date=
 // GET /api/bookings/slots?serviceId=&date=   (date format: "2026-01-21")
 export async function getAvailableSlots(req, res, next) {
@@ -220,11 +244,30 @@ export async function getBookingByToken(req, res, next) {
 // POST /api/bookings/:id/cancel — reachable via account OR manage token
 export async function cancelBooking(req, res, next) {
   try {
-    // TODO: verify the requester owns this booking — either req.user.id
-    // matches clientUserId, OR the request came via a valid manageToken.
-    // Then: set status "cancelled", cancelledAt = now, trigger refund if
-    // already paid, and send cancellation email.
-    res.status(501).json({ error: "Not implemented yet" });
+    const { id } = req.params;
+    const { manageToken } = req.body;
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    const authorized = await isAuthorizedForBooking(req, booking, manageToken);
+    if (!authorized) return res.status(403).json({ error: "Not authorized to modify this booking" });
+
+    if (booking.status === "cancelled") {
+      return res.status(400).json({ error: "Booking is already cancelled" });
+    }
+
+    // TODO: trigger a Stripe refund here if the deposit was already paid —
+    // a good next addition once basic cancel is confirmed working.
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { status: "cancelled", cancelledAt: new Date() },
+    });
+
+    // TODO: sendCancellationEmail(updated) — wiring this up in email automation next.
+
+    res.json(updated);
   } catch (err) {
     next(err);
   }
@@ -233,11 +276,48 @@ export async function cancelBooking(req, res, next) {
 // POST /api/bookings/:id/reschedule
 export async function rescheduleBooking(req, res, next) {
   try {
-    // TODO: don't mutate the old booking's startAt. Instead:
-    // 1. Create a NEW booking with the new startAt, rescheduledFromId = old.id
-    // 2. Mark the OLD booking status = "rescheduled"
-    // This preserves history for analytics (reschedule rate).
-    res.status(501).json({ error: "Not implemented yet" });
+    const { id } = req.params;
+    const { manageToken, startAt } = req.body;
+
+    if (!startAt) return res.status(400).json({ error: "startAt is required" });
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    const authorized = await isAuthorizedForBooking(req, booking, manageToken);
+    if (!authorized) return res.status(403).json({ error: "Not authorized to modify this booking" });
+
+    if (!["pending", "confirmed"].includes(booking.status)) {
+      return res.status(400).json({ error: "This booking can no longer be rescheduled" });
+    }
+
+    const service = await prisma.service.findUnique({ where: { id: booking.serviceId } });
+    const newStart = new Date(startAt);
+    const newEnd = new Date(newStart.getTime() + service.durationMin * 60000);
+
+    // Create the NEW booking — @@unique protects against the new slot
+    // already being taken, same guard as a fresh booking gets.
+    const newBooking = await prisma.booking.create({
+      data: {
+        businessId: booking.businessId,
+        serviceId: booking.serviceId,
+        clientUserId: booking.clientUserId,
+        startAt: newStart,
+        endAt: newEnd,
+        depositAmountCents: booking.depositAmountCents,
+        stripePaymentIntentId: booking.stripePaymentIntentId, // deposit already paid, carry it over
+        status: booking.status,
+        rescheduledFromId: booking.id,
+      },
+    });
+
+    // Mark the OLD booking as rescheduled — never mutate its startAt directly.
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: { status: "rescheduled" },
+    });
+
+    res.status(201).json(newBooking);
   } catch (err) {
     next(err);
   }
