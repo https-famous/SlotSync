@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";         // work up
 import { api } from "../lib/api";
 
 const STATUS_STYLES = {
@@ -29,7 +29,7 @@ export default function MyBookings() {
             No bookings yet. <Link to="/" className="text-teal font-semibold">Browse services →</Link>
           </p>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3">    
             {bookings.map((b) => (
               <Link
                 key={b.id}
