@@ -265,20 +265,18 @@ export async function cancelBooking(req, res, next) {
       return res.status(400).json({ error: "Booking is already cancelled" });
     }
 
-    // TODO: trigger a Stripe refund here if the deposit was already paid —
-    // a good next addition once basic cancel is confirmed working.
-
     const updated = await prisma.booking.update({
       where: { id },
       data: { status: "cancelled", cancelledAt: new Date() },
     });
 
     const [client, service, business] = await Promise.all([
-  prisma.user.findUnique({ where: { id: updated.clientUserId } }),
-  prisma.service.findUnique({ where: { id: updated.serviceId } }),
-  prisma.business.findUnique({ where: { id: updated.businessId } }),
-]);
-await sendCancellationEmail({ ...updated, clientEmail: client.email }, service, business);
+      prisma.user.findUnique({ where: { id: updated.clientUserId } }),
+      prisma.service.findUnique({ where: { id: updated.serviceId } }),
+      prisma.business.findUnique({ where: { id: updated.businessId } }),
+    ]);
+
+    await sendCancellationEmail({ ...updated, clientEmail: client.email }, service, business);
 
     res.json(updated);
   } catch (err) {
