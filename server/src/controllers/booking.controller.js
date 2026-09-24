@@ -183,18 +183,25 @@ export async function stripeWebhook(req, res, next) {
       const paymentIntent = event.data.object;
       const bookingId = paymentIntent.metadata?.bookingId;
 
-      if (bookingId) {
-        const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
-        if (booking && booking.status === "pending") {
-          await prisma.booking.update({
-            where: { id: booking.id },
-            data: {
-              status: "confirmed",
-              stripePaymentIntentId: paymentIntent.id, // backfill in case it never saved earlier
-            },
-          });
-        }
-      }
+      if (booking && booking.status === "pending") {
+  const updated = await prisma.booking.update({
+    where: { id: booking.id },
+    data: {
+      status: "confirmed",
+      stripePaymentIntentId: paymentIntent.id, // backfill in case it never saved earlier
+    },
+  });
+
+  // Need the client's email + service/business details for the email —
+  // none of that lives directly on the booking row.
+  const [client, service, business] = await Promise.all([
+    prisma.user.findUnique({ where: { id: updated.clientUserId } }),
+    prisma.service.findUnique({ where: { id: updated.serviceId } }),
+    prisma.business.findUnique({ where: { id: updated.businessId } }),
+  ]);
+
+  await sendConfirmationEmail({ ...updated, clientEmail: client.email }, service, business);
+}
     }
 
     if (event.type === "payment_intent.payment_failed") {
@@ -266,7 +273,12 @@ export async function cancelBooking(req, res, next) {
       data: { status: "cancelled", cancelledAt: new Date() },
     });
 
-    // TODO: sendCancellationEmail(updated) — wiring this up in email automation next.
+    const [client, service, business] = await Promise.all([
+  prisma.user.findUnique({ where: { id: updated.clientUserId } }),
+  prisma.service.findUnique({ where: { id: updated.serviceId } }),
+  prisma.business.findUnique({ where: { id: updated.businessId } }),
+]);
+await sendCancellationEmail({ ...updated, clientEmail: client.email }, service, business);
 
     res.json(updated);
   } catch (err) {
