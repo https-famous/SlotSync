@@ -1,6 +1,7 @@
 import { prisma } from "../config/db.js";
 import { stripe } from "../utils/stripe.js";
 import jwt from "jsonwebtoken";
+import { sendConfirmationEmail, sendCancellationEmail } from "../utils/email.js";
 
 
 
