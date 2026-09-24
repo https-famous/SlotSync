@@ -41,9 +41,9 @@ CREATE TABLE "Service" (
     "priceCents" INTEGER NOT NULL,
     "depositCents" INTEGER NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,              //the (3) tells postgres to go tho 3 decimap point
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,            --the (3) tells postgres to go tho 3 decimap point
 
-    CONSTRAINT "Service_pkey" PRIMARY KEY ("id")                            // this was generted when we made the id our primary key pkey = "primary key." This line tells Postgres: enforce that id is unique and never null, and treat it as the rows 
+    CONSTRAINT "Service_pkey" PRIMARY KEY ("id")                            -- this was generted when we made the id our primary key pkey = "primary key." This line tells Postgres: enforce that id is unique and never null, and treat it as the rows 
 );
 
 -- CreateTable
@@ -89,7 +89,7 @@ CREATE TABLE "Booking" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");                               //this basically combines the unique feature which helps to go through rows of value and @@unique at a faster speed
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");                               --this basically combines the unique feature which helps to go through rows of value and @@unique at a faster speed
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Business_ownerId_key" ON "Business"("ownerId");

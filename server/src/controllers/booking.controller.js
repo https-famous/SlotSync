@@ -321,6 +321,23 @@ export async function rescheduleBooking(req, res, next) {
         rescheduledFromId: booking.id,
       },
     });
+    // GET /api/bookings/business — owner's view of all bookings for their business
+export async function getBusinessBookings(req, res, next) {
+  try {
+    const business = await prisma.business.findUnique({ where: { ownerId: req.user.id } });
+    if (!business) return res.status(404).json({ error: "You don't have a business yet" });
+
+    const bookings = await prisma.booking.findMany({
+      where: { businessId: business.id },
+      include: { service: true, clientUser: { select: { name: true, email: true } } },
+      orderBy: { startAt: "desc" },
+    });
+
+    res.json(bookings);
+  } catch (err) {
+    next(err);
+  }
+}
 
     // Mark the OLD booking as rescheduled — never mutate its startAt directly.
     await prisma.booking.update({

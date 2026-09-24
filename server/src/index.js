@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 
+import { startReminderJob } from "./jobs/reminders.js";
 import authRoutes from "./routes/auth.routes.js";
 import businessRoutes from "./routes/business.routes.js";
 import serviceRoutes from "./routes/service.routes.js";
@@ -28,4 +29,5 @@ app.use("/api/availability", availabilityRoutes);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 4000;
+startReminderJob();
 app.listen(PORT, () => console.log(`SlotSync API running on :${PORT}`));
