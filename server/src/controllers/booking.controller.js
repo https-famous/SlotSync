@@ -27,6 +27,44 @@ async function isAuthorizedForBooking(req, booking, manageToken) {
 
   return false;
 }
+// GET /api/bookings/business — owner's view of all bookings for their business
+export async function getBusinessBookings(req, res, next) {
+  try {
+    const business = await prisma.business.findUnique({ where: { ownerId: req.user.id } });
+    if (!business) return res.status(404).json({ error: "You don't have a business yet" });
+
+    const bookings = await prisma.booking.findMany({
+      where: { businessId: business.id },
+      include: { service: true, clientUser: { select: { name: true, email: true } } },
+      orderBy: { startAt: "desc" },
+    });
+
+    res.json(bookings);
+  } catch (err) {
+    next(err);
+  }
+}
+// PATCH /api/bookings/:id — owner-only status changes (e.g. mark completed/no_show)
+export async function updateBookingStatus(req, res, next) {
+  try {
+    const business = await prisma.business.findUnique({ where: { ownerId: req.user.id } });
+    if (!business) return res.status(404).json({ error: "You don't have a business yet" });
+
+    const booking = await prisma.booking.findUnique({ where: { id: req.params.id } });
+    if (!booking || booking.businessId !== business.id) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id: req.params.id },
+      data: { status: req.body.status },
+    });
+
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+}
 // GET /api/bookings/slots?serviceId=&date=
 // GET /api/bookings/slots?serviceId=&date=   (date format: "2026-01-21")
 export async function getAvailableSlots(req, res, next) {
@@ -321,23 +359,6 @@ export async function rescheduleBooking(req, res, next) {
         rescheduledFromId: booking.id,
       },
     });
-    // GET /api/bookings/business — owner's view of all bookings for their business
-export async function getBusinessBookings(req, res, next) {
-  try {
-    const business = await prisma.business.findUnique({ where: { ownerId: req.user.id } });
-    if (!business) return res.status(404).json({ error: "You don't have a business yet" });
-
-    const bookings = await prisma.booking.findMany({
-      where: { businessId: business.id },
-      include: { service: true, clientUser: { select: { name: true, email: true } } },
-      orderBy: { startAt: "desc" },
-    });
-
-    res.json(bookings);
-  } catch (err) {
-    next(err);
-  }
-}
 
     // Mark the OLD booking as rescheduled — never mutate its startAt directly.
     await prisma.booking.update({

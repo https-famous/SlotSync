@@ -1,7 +1,6 @@
 import jwt from "jsonwebtoken";
+import { prisma } from "../config/db.js";
 
-// Attaches req.user = { id, role } if a valid JWT is present.
-// Use requireAuth on any route that needs a signed-in user.
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization;
   const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
@@ -16,10 +15,14 @@ export function requireAuth(req, res, next) {
   }
 }
 
-// Use after requireAuth on owner-only routes (e.g. managing a business).
-export function requireOwner(req, res, next) {
-  if (req.user?.role !== "owner") {
-    return res.status(403).json({ error: "Business account required" });
+// Source of truth is the database (does this user own a business?),
+// not the role frozen inside the token at login time.
+export async function requireOwner(req, res, next) {
+  try {
+    const business = await prisma.business.findUnique({ where: { ownerId: req.user.id } });
+    if (!business) return res.status(403).json({ error: "Business account required" });
+    next();
+  } catch (err) {
+    next(err);
   }
-  next();
 }

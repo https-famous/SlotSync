@@ -7,8 +7,10 @@ import {
   getBookingByToken,
   cancelBooking,
   rescheduleBooking,
+  getBusinessBookings,
+  updateBookingStatus,
 } from "../controllers/booking.controller.js";
-import { requireAuth } from "../middleware/auth.middleware.js";
+import { requireAuth, requireOwner } from "../middleware/auth.middleware.js";
 
 const router = Router();
 
@@ -18,7 +20,9 @@ router.post("/webhook", stripeWebhook);            // Stripe PaymentIntent event
 
 router.get("/mine", requireAuth, getMyBookings);   // account dashboard path
 router.get("/manage/:token", getBookingByToken);   // magic-link path (no auth)
+router.get("/business", requireAuth, requireOwner, getBusinessBookings);
 
+router.patch("/:id", requireAuth, requireOwner, updateBookingStatus);
 router.post("/:id/cancel", cancelBooking);
 router.post("/:id/reschedule", rescheduleBooking);
 

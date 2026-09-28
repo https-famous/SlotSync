@@ -76,9 +76,15 @@ export async function createBusiness(req, res, next) {
 // PATCH /api/businesses/:id — owner-only, edit their own business
 export async function updateBusiness(req, res, next) {
   try {
-    // TODO: verify req.params.id belongs to req.user.id before updating —
-    // this is the multi-tenancy scoping check.
-    res.status(501).json({ error: "Not implemented yet" });
+    const business = await prisma.business.findUnique({ where: { ownerId: req.user.id } });
+    if (!business || business.id !== req.params.id) {
+      return res.status(404).json({ error: "Business not found" });
+    }
+    const updated = await prisma.business.update({
+      where: { id: req.params.id },
+      data: req.body,
+    });
+    res.json(updated);
   } catch (err) {
     next(err);
   }
